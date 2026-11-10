@@ -26,6 +26,7 @@ export interface ZohoInterface {
         }) => Promise<any>;
         getUser: (Object: { ID: string }) => Promise<any>;
         getOrgVariable: (arg0: string) => Promise<any>;
+        coql: (Object: { select_query: string }) => Promise<any>;
       };
       META: {
         getFields: (Object: { Entity: string }) => Promise<any>;

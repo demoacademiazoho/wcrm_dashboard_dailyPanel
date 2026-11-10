@@ -1,0 +1,151 @@
+void schedule.fn_resumo_diario()
+{
+	// Destinatarios (separar por virgula). Para producao trocar pelos emails da equipa.
+	destinatarios = "ivanildo.academia@gmail.com";
+	// Remetente: utilizador do CRM (a API de envio so aceita utilizadores do CRM)
+	remetenteId = "1027502000000562001";
+	remetenteEmail = "groupteam.academiazoho@loba.com";
+	// Template WF31 - Painel do dia (Modelos > Email > Entregas e Recolhas)
+	templateId = "1027502000001242022";
+
+	hojeTxt = zoho.currentdate.toString("yyyy-MM-dd");
+	logistica = zoho.crm.getRecords("Deliveries_Pickups",1,200);
+
+	linhasEntregas = "";
+	linhasRecolhas = "";
+	totalEntregas = 0;
+	totalRecolhas = 0;
+	idRef = "";
+	if(logistica != null)
+	{
+		for each  r in logistica
+		{
+			if(idRef == "")
+			{
+				idRef = r.get("id").toString();
+			}
+			dataTxt = ifnull(r.get("Scheduled_DateTime"),"").toString();
+			if(dataTxt.length() >= 16 && dataTxt.subString(0,10) == hojeTxt)
+			{
+				hora = dataTxt.subString(11,16);
+				responsavel = "-";
+				if(r.get("Responsible") != null)
+				{
+					responsavel = r.get("Responsible").get("name");
+				}
+				reserva = "-";
+				if(r.get("Reservation") != null)
+				{
+					reserva = r.get("Reservation").get("name");
+				}
+				estado = ifnull(r.get("Logistics_Status"),"-");
+				linha = "<tr><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + hora + "</td><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + reserva + "</td><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + responsavel + "</td><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + estado + "</td></tr>";
+				if(r.get("Logistics_Type") == "Entrega")
+				{
+					linhasEntregas = linhasEntregas + linha;
+					totalEntregas = totalEntregas + 1;
+				}
+				else
+				{
+					linhasRecolhas = linhasRecolhas + linha;
+					totalRecolhas = totalRecolhas + 1;
+				}
+			}
+		}
+	}
+	if(linhasEntregas == "")
+	{
+		linhasEntregas = "<tr><td colspan='4' style='padding:8px;color:#6b7280'>Sem entregas agendadas para hoje.</td></tr>";
+	}
+	if(linhasRecolhas == "")
+	{
+		linhasRecolhas = "<tr><td colspan='4' style='padding:8px;color:#6b7280'>Sem recolhas agendadas para hoje.</td></tr>";
+	}
+
+	// Reservas em atraso (so conta se o fim previsto ja passou)
+	atrasadas = zoho.crm.searchRecords("Reservations","(Is_Overdue:equals:true)",1,200);
+	linhasAtraso = "";
+	totalAtraso = 0;
+	if(atrasadas != null)
+	{
+		for each  a in atrasadas
+		{
+			fimTxt = ifnull(a.get("End_Date"),"").toString();
+			if(fimTxt != "" && fimTxt.toDate() < hojeTxt.toDate())
+			{
+				cliente = "-";
+				if(a.get("Contact") != null)
+				{
+					cliente = a.get("Contact").get("name");
+				}
+				dias = ifnull(a.get("Overdue_Days"),0);
+				linhasAtraso = linhasAtraso + "<tr><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + a.get("Name") + "</td><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + cliente + "</td><td style='padding:8px;border-bottom:1px solid #e5e7eb'>" + fimTxt + "</td><td style='padding:8px;border-bottom:1px solid #e5e7eb;color:#b91c1c'><b>" + dias + " dia(s)</b></td></tr>";
+				totalAtraso = totalAtraso + 1;
+			}
+		}
+	}
+	if(linhasAtraso == "")
+	{
+		linhasAtraso = "<tr><td colspan='4' style='padding:8px;color:#6b7280'>Nenhuma reserva em atraso.</td></tr>";
+	}
+
+	cab = "<th align='left' style='padding:8px;background:#f3f4f6;font-size:12px;color:#374151'>";
+	abre = "<table width='100%' cellspacing='0' style='font-size:14px;border:1px solid #e5e7eb'>";
+	tabEntregas = abre + "<tr>" + cab + "Hora</th>" + cab + "Reserva</th>" + cab + "Responsavel</th>" + cab + "Estado</th></tr>" + linhasEntregas + "</table>";
+	tabRecolhas = abre + "<tr>" + cab + "Hora</th>" + cab + "Reserva</th>" + cab + "Responsavel</th>" + cab + "Estado</th></tr>" + linhasRecolhas + "</table>";
+	tabAtraso = abre + "<tr>" + cab + "Reserva</th>" + cab + "Cliente</th>" + cab + "Fim previsto</th>" + cab + "Dias de atraso</th></tr>" + linhasAtraso + "</table>";
+
+	// Le o template WF31 - Painel do dia pela ligacao crm_painel_dia
+	tpl = invokeurl
+	[
+		url :"https://www.zohoapis.eu/crm/v6/settings/email_templates/" + templateId
+		type :GET
+		connection :"crm_painel_dia"
+	];
+	modelo = tpl.get("email_templates").get(0);
+	corpo = modelo.get("content");
+	corpo = corpo.replaceAll("{{DATA}}",hojeTxt);
+	corpo = corpo.replaceAll("{{TOTAL_ENTREGAS}}",totalEntregas.toString());
+	corpo = corpo.replaceAll("{{TOTAL_RECOLHAS}}",totalRecolhas.toString());
+	corpo = corpo.replaceAll("{{TOTAL_ATRASO}}",totalAtraso.toString());
+	corpo = corpo.replaceAll("{{TABELA_ENTREGAS}}",tabEntregas);
+	corpo = corpo.replaceAll("{{TABELA_RECOLHAS}}",tabRecolhas);
+	corpo = corpo.replaceAll("{{TABELA_ATRASO}}",tabAtraso);
+	assunto = ifnull(modelo.get("subject"),"Painel do dia") + " - " + hojeTxt;
+
+	// Envio pela API do CRM (send_mail), associado a um registo de Entregas e Recolhas
+	if(idRef == "")
+	{
+		info "Sem registos em Entregas e Recolhas para associar o email.";
+		return;
+	}
+	de = Map();
+	de.put("user_id",remetenteId);
+	de.put("email",remetenteEmail);
+	para = Map();
+	para.put("email",destinatarios);
+	listaPara = List();
+	listaPara.add(para);
+	msg = Map();
+	msg.put("from",de);
+	msg.put("to",listaPara);
+	msg.put("subject",assunto);
+	msg.put("content",corpo);
+	msg.put("mail_format","html");
+	listaMsg = List();
+	listaMsg.add(msg);
+	pedido = Map();
+	pedido.put("data",listaMsg);
+	cabecalhos = Map();
+	cabecalhos.put("Content-Type","application/json");
+	resposta = invokeurl
+	[
+		url :"https://www.zohoapis.eu/crm/v6/Deliveries_Pickups/" + idRef + "/actions/send_mail"
+		type :POST
+		parameters :pedido.toString()
+		headers :cabecalhos
+		connection :"crm_painel_dia"
+	];
+	info "Resumo: " + totalEntregas + " entregas, " + totalRecolhas + " recolhas, " + totalAtraso + " atrasadas";
+	info resposta;
+}
