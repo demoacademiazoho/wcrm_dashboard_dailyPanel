@@ -1,5 +1,5 @@
 <template>
-  <div class="relative">
+  <div class="relative self-start">
     <span class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-400">
       <svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />

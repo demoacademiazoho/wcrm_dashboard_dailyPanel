@@ -4,6 +4,7 @@ import { useParamsStore } from '@/stores/params'
 import { zohoInit } from './utils/zohoFunctions'
 import WorkOrderForm from '@/components/WorkOrderForm.vue'
 import CustomerList from '@/components/CustomerList.vue'
+import ExamplesShowcase from '@/components/ExamplesShowcase.vue'
 import ToastContainer from '@/components/main/ToastContainer.vue'
 import NavBar from '@/components/main/NavBar.vue'
 import Loader from '@/components/main/Loader.vue'
@@ -21,7 +22,7 @@ onMounted(async () => {
 
 // Toggle this to 'top' | 'left' | 'right'
 const navPosition = ref<NavPosition>('top')
-const activeNav = ref('work-orders')
+const activeNav = ref('examples')
 
 const layoutClass = computed(() => (navPosition.value === 'top' ? 'flex-col' : 'flex-row'))
 </script>
@@ -36,6 +37,7 @@ const layoutClass = computed(() => (navPosition.value === 'top' ? 'flex-col' : '
     <main class="flex flex-1 flex-col overflow-y-auto p-6">
       <WorkOrderForm v-if="activeNav === 'work-orders'" />
       <CustomerList v-else-if="activeNav === 'customers'" />
+      <ExamplesShowcase v-else-if="activeNav === 'examples'" />
       <div v-else class="flex flex-1 items-center justify-center text-zinc-400 text-sm">
         Select a section from the nav.
       </div>
