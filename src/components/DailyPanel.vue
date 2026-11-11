@@ -1,83 +1,99 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   getMockData,
   getOverdueReservations,
   getTodayLogistics,
   type LogisticsItem,
   type OverdueItem,
-} from '@/utils/dailyPanel'
+} from "@/utils/dailyPanel";
 
-const props = defineProps<{ mock?: boolean }>()
+const props = defineProps<{ mock?: boolean }>();
 
-const logistics = ref<LogisticsItem[]>([])
-const overdue = ref<OverdueItem[]>([])
-const loading = ref(false)
-const error = ref('')
-const updatedAt = ref<Date | null>(null)
-let timer: ReturnType<typeof setInterval> | undefined
+const logistics = ref<LogisticsItem[]>([]);
+const overdue = ref<OverdueItem[]>([]);
+const loading = ref(false);
+const error = ref("");
+const updatedAt = ref<Date | null>(null);
+let timer: ReturnType<typeof setInterval> | undefined;
 
-const deliveries = computed(() => logistics.value.filter((l) => l.type === 'Entrega'))
-const pickups = computed(() => logistics.value.filter((l) => l.type === 'Recolha'))
+const deliveries = computed(() =>
+  logistics.value.filter((l) => l.type === "Entrega"),
+);
+const pickups = computed(() =>
+  logistics.value.filter((l) => l.type === "Recolha"),
+);
 
-const todayLabel = new Date().toLocaleDateString('pt-PT', {
-  weekday: 'long',
-  day: '2-digit',
-  month: 'long',
-  year: 'numeric',
-})
+const todayLabel = new Date().toLocaleDateString("pt-PT", {
+  weekday: "long",
+  day: "2-digit",
+  month: "long",
+  year: "numeric",
+});
+
+function openRecord(entity: string, id: string) {
+  if (!id) return;
+  ZOHO.CRM.UI.Record.open({ Entity: entity, RecordID: id });
+}
 
 function time(iso: string) {
-  if (!iso) return '-'
-  return new Date(iso).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+  if (!iso) return "-";
+  return new Date(iso).toLocaleTimeString("pt-PT", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function statusClass(status: string) {
   switch (status) {
-    case 'Concluída':
-      return 'bg-green-100 text-green-700'
-    case 'Em curso':
-      return 'bg-blue-100 text-blue-700'
-    case 'Falhada':
-      return 'bg-red-100 text-red-700'
-    case 'Reagendada':
-      return 'bg-amber-100 text-amber-700'
+    case "Concluída":
+      return "bg-green-100 text-green-700";
+    case "Em curso":
+      return "bg-blue-100 text-blue-700";
+    case "Falhada":
+      return "bg-red-100 text-red-700";
+    case "Reagendada":
+      return "bg-amber-100 text-amber-700";
     default:
-      return 'bg-zinc-100 text-zinc-600'
+      return "bg-zinc-100 text-zinc-600";
   }
 }
 
 function overdueClass(days: number) {
-  return days >= 3 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+  return days >= 3 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700";
 }
 
 async function load() {
-  loading.value = true
-  error.value = ''
+  loading.value = true;
+  error.value = "";
   try {
     if (props.mock) {
-      const m = getMockData()
-      logistics.value = m.logistics
-      overdue.value = m.overdue
+      const m = getMockData();
+      logistics.value = m.logistics;
+      overdue.value = m.overdue;
     } else {
-      const [l, o] = await Promise.all([getTodayLogistics(), getOverdueReservations()])
-      logistics.value = l
-      overdue.value = o
+      const [l, o] = await Promise.all([
+        getTodayLogistics(),
+        getOverdueReservations(),
+      ]);
+      logistics.value = l;
+      overdue.value = o;
     }
-    updatedAt.value = new Date()
+    updatedAt.value = new Date();
   } catch (e: any) {
-    console.error('Painel do dia: erro ao ler o CRM', e)
-    error.value = 'Não foi possível ler os dados do CRM. Verifica as permissões do teu perfil.'
+    console.error("Painel do dia: erro ao ler o CRM", e);
+    error.value =
+      "Não foi possível ler os dados do CRM. Verifica as permissões do teu perfil.";
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 onMounted(() => {
-  load()
-  timer = setInterval(load, 5 * 60 * 1000) // atualiza de 5 em 5 minutos
-})
-onUnmounted(() => clearInterval(timer))
+  load();
+  timer = setInterval(load, 5 * 60 * 1000); // atualiza de 5 em 5 minutos
+});
+onUnmounted(() => clearInterval(timer));
 </script>
 
 <template>
@@ -88,42 +104,70 @@ onUnmounted(() => clearInterval(timer))
         <p class="text-sm capitalize text-zinc-500">{{ todayLabel }}</p>
       </div>
       <div class="flex items-center gap-3 text-xs text-zinc-500">
-        <span v-if="mock" class="rounded bg-amber-100 px-2 py-1 font-medium text-amber-700">
+        <span
+          v-if="mock"
+          class="rounded bg-amber-100 px-2 py-1 font-medium text-amber-700"
+        >
           Dados fictícios (fora do CRM)
         </span>
-        <span v-if="updatedAt">Atualizado às {{ time(updatedAt.toISOString()) }}</span>
+        <span v-if="updatedAt"
+          >Atualizado às {{ time(updatedAt.toISOString()) }}</span
+        >
         <button
           type="button"
           class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
           :disabled="loading"
           @click="load"
         >
-          {{ loading ? 'A atualizar...' : 'Atualizar' }}
+          {{ loading ? "A atualizar..." : "Atualizar" }}
         </button>
       </div>
     </header>
 
-    <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+    <p
+      v-if="error"
+      class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+    >
       {{ error }}
     </p>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <div class="rounded-xl border border-zinc-200 bg-white p-4">
-        <p class="text-xs font-semibold uppercase tracking-widest text-zinc-400">Entregas hoje</p>
-        <p class="mt-1 text-3xl font-semibold text-primary-600">{{ deliveries.length }}</p>
+        <p
+          class="text-xs font-semibold uppercase tracking-widest text-zinc-400"
+        >
+          Entregas hoje
+        </p>
+        <p class="mt-1 text-3xl font-semibold text-primary-600">
+          {{ deliveries.length }}
+        </p>
       </div>
       <div class="rounded-xl border border-zinc-200 bg-white p-4">
-        <p class="text-xs font-semibold uppercase tracking-widest text-zinc-400">Recolhas hoje</p>
-        <p class="mt-1 text-3xl font-semibold text-primary-600">{{ pickups.length }}</p>
+        <p
+          class="text-xs font-semibold uppercase tracking-widest text-zinc-400"
+        >
+          Recolhas hoje
+        </p>
+        <p class="mt-1 text-3xl font-semibold text-primary-600">
+          {{ pickups.length }}
+        </p>
       </div>
       <div class="rounded-xl border border-zinc-200 bg-white p-4">
-        <p class="text-xs font-semibold uppercase tracking-widest text-zinc-400">Reservas em atraso</p>
-        <p class="mt-1 text-3xl font-semibold text-red-600">{{ overdue.length }}</p>
+        <p
+          class="text-xs font-semibold uppercase tracking-widest text-zinc-400"
+        >
+          Reservas em atraso
+        </p>
+        <p class="mt-1 text-3xl font-semibold text-red-600">
+          {{ overdue.length }}
+        </p>
       </div>
     </div>
 
     <div class="rounded-xl border border-zinc-200 bg-white">
-      <h2 class="border-b border-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-700">
+      <h2
+        class="border-b border-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-700"
+      >
         Entregas e recolhas de hoje
       </h2>
       <p v-if="!logistics.length" class="p-4 text-sm text-zinc-400">
@@ -137,18 +181,39 @@ onUnmounted(() => clearInterval(timer))
             <th class="px-4 py-2">Reserva</th>
             <th class="px-4 py-2">Responsável</th>
             <th class="px-4 py-2">Estado</th>
+            <th class="px-4 py-2"></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="l in logistics" :key="l.id" class="border-t border-zinc-100">
-            <td class="px-4 py-2 font-medium text-zinc-700">{{ time(l.scheduledAt) }}</td>
+          <tr
+            v-for="l in logistics"
+            :key="l.id"
+            class="border-t border-zinc-100"
+          >
+            <td class="px-4 py-2 font-medium text-zinc-700">
+              {{ time(l.scheduledAt) }}
+            </td>
             <td class="px-4 py-2">{{ l.type }}</td>
-            <td class="px-4 py-2">{{ l.reservation }}</td>
+            <td class="px-4 py-2">
+              <a href="#" class="text-primary-600 hover:underline"
+                @click.prevent="openRecord('Reservations', l.reservationId)"
+                >{{ l.reservation }}</a
+              >
+            </td>
             <td class="px-4 py-2">{{ l.responsible }}</td>
             <td class="px-4 py-2">
-              <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(l.status)">
+              <span
+                class="rounded-full px-2 py-0.5 text-xs font-medium"
+                :class="statusClass(l.status)"
+              >
                 {{ l.status }}
               </span>
+            </td>
+            <td class="px-4 py-2 text-right">
+              <button type="button" class="rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                @click="openRecord('Deliveries_Pickups', l.id)">
+                Ver detalhes
+              </button>
             </td>
           </tr>
         </tbody>
@@ -156,10 +221,14 @@ onUnmounted(() => clearInterval(timer))
     </div>
 
     <div class="rounded-xl border border-zinc-200 bg-white">
-      <h2 class="border-b border-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-700">
+      <h2
+        class="border-b border-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-700"
+      >
         Reservas em atraso
       </h2>
-      <p v-if="!overdue.length" class="p-4 text-sm text-zinc-400">Nenhuma reserva em atraso.</p>
+      <p v-if="!overdue.length" class="p-4 text-sm text-zinc-400">
+        Nenhuma reserva em atraso.
+      </p>
       <table v-else class="w-full text-left text-sm">
         <thead class="text-xs uppercase text-zinc-400">
           <tr>
@@ -168,18 +237,38 @@ onUnmounted(() => clearInterval(timer))
             <th class="px-4 py-2">Fim previsto</th>
             <th class="px-4 py-2">Estado</th>
             <th class="px-4 py-2">Dias de atraso</th>
+            <th class="px-4 py-2"></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="o in overdue" :key="o.id" class="border-t border-zinc-100">
-            <td class="px-4 py-2 font-medium text-zinc-700">{{ o.name }}</td>
-            <td class="px-4 py-2">{{ o.client }}</td>
+            <td class="px-4 py-2 font-medium">
+              <a href="#" class="text-primary-600 hover:underline"
+                @click.prevent="openRecord('Reservations', o.id)"
+                >{{ o.name }}</a
+              >
+            </td>
+            <td class="px-4 py-2">
+              <a href="#" class="text-primary-600 hover:underline"
+                @click.prevent="openRecord('Contacts', o.clientId)"
+                >{{ o.client }}</a
+              >
+            </td>
             <td class="px-4 py-2">{{ o.endDate }}</td>
             <td class="px-4 py-2">{{ o.status }}</td>
             <td class="px-4 py-2">
-              <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="overdueClass(o.overdueDays)">
+              <span
+                class="rounded-full px-2 py-0.5 text-xs font-medium"
+                :class="overdueClass(o.overdueDays)"
+              >
                 {{ o.overdueDays }} dia(s)
               </span>
+            </td>
+            <td class="px-4 py-2 text-right">
+              <button type="button" class="rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                @click="openRecord('Reservations', o.id)">
+                Ver detalhes
+              </button>
             </td>
           </tr>
         </tbody>

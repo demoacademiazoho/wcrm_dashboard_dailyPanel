@@ -42,7 +42,7 @@ export interface ZohoInterface {
           open: (data: {
             Entity: string;
             RecordID: string;
-            target: string;
+            target?: string;
           }) => Promise<any>;
           edit: (data: {
             Entity: string;
