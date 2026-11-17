@@ -1,134 +1,180 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Leitura (COQL) do Painel do dia. Campos confirmados no CRM (14/11/2026, getFields só leitura).
+ * Entregas/Inspeções não têm cliente nem localidade próprios: vêm da Reserva (enrich).
+ */
 import type { ZohoInterface } from '@/interfaces/zohoInterface'
+import type { InspectionItem, LogisticsItem, OverdueItem, PanelData } from '@/interfaces/panel'
+import { toZohoDate, toZohoDateTime } from '@/utils/dates'
 
 declare const ZOHO: ZohoInterface
 
-// MR-025 - widget_DailyPanel: entregas/recolhas do dia e reservas em atraso.
-// API names confirmados no CRM: Deliveries_Pickups e Reservations.
+const PAGE_SIZE = 200 // limite da COQL por pedido
+const IN_LIMIT = 50 // HIPÓTESE: a COQL aceita no máximo 50 valores num "in"
+const DEBUG = false // true = escreve na consola os pedidos
 
-export interface LogisticsItem {
-  id: string
-  name: string
-  type: string // Logistics_Type: Entrega | Recolha
-  status: string // Logistics_Status
-  scheduledAt: string // Scheduled_DateTime (ISO)
-  responsible: string
-  reservation: string
-  reservationId: string // id da reserva (Reservation.id) para abrir a reserva no CRM
-}
-
-export interface OverdueItem {
-  id: string
-  name: string
-  overdueDays: number
-  endDate: string
-  client: string
-  status: string
-  clientId: string // id do cliente (Contact.id) para abrir o contacto no CRM
-}
-
-// Devolve a data com o offset local no formato que o COQL aceita: 2026-11-10T00:00:00+00:00
-function toCoqlDateTime(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const off = -d.getTimezoneOffset()
-  const sign = off >= 0 ? '+' : '-'
-  const abs = Math.abs(off)
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
-    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
-  )
-}
-
-// Um lookup pode vir como texto, como { id, name } ou vazio.
+// Um lookup pode vir como texto, como { id, name } ou vazio
 function lookupName(v: any): string {
-  if (!v) return '-'
+  if (!v) return ''
   if (typeof v === 'string') return v
-  return v.name || v.Name || v.full_name || '-'
+  return v.name || v.Name || v.full_name || ''
 }
 
-// Campos relacionados do COQL (ex.: Responsible.last_name) podem vir com a chave plana ou aninhada.
-function relatedValue(r: any, lookup: string, field: string): string {
+// Campos relacionados (ex.: Responsible.last_name) podem vir com a chave plana ou aninhada
+function related(r: any, lookup: string, field: string): string {
   const v = r[`${lookup}.${field}`] ?? r[lookup]?.[field]
   return v ? String(v) : ''
 }
 
-function fullName(r: any, lookup: string, first: string, last: string): string {
-  const name = `${relatedValue(r, lookup, first)} ${relatedValue(r, lookup, last)}`.trim()
-  return name || lookupName(r[lookup])
-}
+const fullName = (r: any, lookup: string, first: string, last: string) =>
+  `${related(r, lookup, first)} ${related(r, lookup, last)}`.trim() || lookupName(r[lookup])
 
-async function runCoql(query: string): Promise<any[]> {
+async function coql(query: string): Promise<any[]> {
+  if (DEBUG) console.log('[painel]', query)
   const res = await ZOHO.CRM.API.coql({ select_query: query })
-  // Sem registos, o COQL pode devolver 204 (res vazio/undefined).
+  // Sem registos, a COQL pode devolver 204 (res vazio/undefined)
   return res?.data ?? []
 }
 
-export async function getTodayLogistics(): Promise<LogisticsItem[]> {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const end = new Date()
-  end.setHours(23, 59, 59, 0)
-  const query =
-    'select id, Name, Logistics_Type, Logistics_Status, Scheduled_DateTime, ' +
-    'Responsible.first_name, Responsible.last_name, Reservation.Name, Reservation.id ' +
-    'from Deliveries_Pickups ' +
-    `where Scheduled_DateTime between '${toCoqlDateTime(start)}' and '${toCoqlDateTime(end)}' ` +
-    'order by Scheduled_DateTime asc limit 200'
-  const rows = await runCoql(query)
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.Name ?? '-',
-    type: r.Logistics_Type ?? '-',
-    status: r.Logistics_Status ?? '-',
-    scheduledAt: r.Scheduled_DateTime ?? '',
-    responsible: fullName(r, 'Responsible', 'first_name', 'last_name'),
-    reservation: relatedValue(r, 'Reservation', 'Name') || lookupName(r.Reservation),
-    reservationId: relatedValue(r, 'Reservation', 'id') || r.Reservation?.id || '',
-  }))
+// Em caso de erro, diz qual o módulo e a query que o CRM recusou (para se perceber logo qual campo falhou)
+async function coqlAll(select: string, from: string, where: string, order: string): Promise<any[]> {
+  const rows: any[] = []
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const query = `select ${select} from ${from} where ${where} order by ${order} limit ${offset}, ${PAGE_SIZE}`
+    if (DEBUG) console.log('[painel]', query)
+    try {
+      const res = await ZOHO.CRM.API.coql({ select_query: query })
+      rows.push(...(res?.data ?? []))
+      if (!res?.info?.more_records) break
+    } catch (e) {
+      console.error(`[painel] COQL recusada em ${from}:`, query, e)
+      throw e
+    }
+  }
+  return rows
+}
+
+const chunk = <T,>(a: T[], n: number): T[][] => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n))
+
+// Cliente (Empresa, senão Cliente) e localidade de cada Reserva
+async function reservationInfo(ids: string[]): Promise<Map<string, { client: string; city: string }>> {
+  const info = new Map<string, { client: string; city: string }>()
+  for (const part of chunk([...new Set(ids.filter(Boolean))], IN_LIMIT)) {
+    // Cliente e localidade são extras: se esta leitura falhar, o painel continua sem eles (e regista o erro)
+    const rows = await coql(
+      'select id, Delivery_Address_City, Account.Account_Name, Contact.First_Name, Contact.Last_Name ' +
+        `from Reservations where id in (${part.map((i) => `'${i}'`).join(',')}) limit 0, ${IN_LIMIT}`,
+    ).catch((e) => {
+      console.error('[painel] Não foi possível ler cliente/localidade das reservas:', e)
+      return [] as any[]
+    })
+    for (const r of rows) {
+      info.set(r.id, {
+        client: related(r, 'Account', 'Account_Name') || fullName(r, 'Contact', 'First_Name', 'Last_Name') || lookupName(r.Account),
+        city: r.Delivery_Address_City ?? '',
+      })
+    }
+  }
+  return info
+}
+
+const dayRange = (day: Date): [string, string] => {
+  const s = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0)
+  const e = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59)
+  return [toZohoDateTime(s), toZohoDateTime(e)]
+}
+
+export async function getLogistics(day: Date): Promise<LogisticsItem[]> {
+  const [from, to] = dayRange(day)
+  const rows = await coqlAll(
+    'id, Name, Logistics_Type, Logistics_Status, Scheduled_DateTime, Vehicle, Delivery_Address_City, ' +
+      'Responsible.first_name, Responsible.last_name, Responsible.id, Reservation.Name, Reservation.id',
+    'Deliveries_Pickups',
+    `Scheduled_DateTime between '${from}' and '${to}'`,
+    'Scheduled_DateTime asc',
+  )
+  const info = await reservationInfo(rows.map((r) => related(r, 'Reservation', 'id') || r.Reservation?.id))
+  return rows.map((r) => {
+    const reservationId = related(r, 'Reservation', 'id') || r.Reservation?.id || ''
+    const i = info.get(reservationId)
+    return {
+      id: r.id,
+      name: r.Name ?? '—',
+      type: r.Logistics_Type ?? '—',
+      status: r.Logistics_Status ?? '—',
+      scheduledAt: r.Scheduled_DateTime ?? '',
+      responsibleId: related(r, 'Responsible', 'id') || r.Responsible?.id || '',
+      responsible: fullName(r, 'Responsible', 'first_name', 'last_name'),
+      vehicle: r.Vehicle ?? '',
+      client: i?.client ?? '',
+      city: r.Delivery_Address_City || i?.city || '',
+      reservation: related(r, 'Reservation', 'Name') || lookupName(r.Reservation),
+      reservationId,
+    }
+  })
+}
+
+export async function getInspections(day: Date): Promise<InspectionItem[]> {
+  const [from, to] = dayRange(day)
+  const rows = await coqlAll(
+    'id, Name, Inspection_Type, Inspection_Status, Inspection_DateTime, Inspector.first_name, Inspector.last_name, Inspector.id, ' +
+      'Unit.Name, Reservation.Name, Reservation.id',
+    'Inspections',
+    `Inspection_DateTime between '${from}' and '${to}'`,
+    'Inspection_DateTime asc',
+  )
+  const info = await reservationInfo(rows.map((r) => related(r, 'Reservation', 'id') || r.Reservation?.id))
+  return rows.map((r) => {
+    const reservationId = related(r, 'Reservation', 'id') || r.Reservation?.id || ''
+    const i = info.get(reservationId)
+    return {
+      id: r.id,
+      name: r.Name ?? '—',
+      type: r.Inspection_Type ?? '—',
+      status: r.Inspection_Status ?? '—',
+      at: r.Inspection_DateTime ?? '',
+      inspectorId: related(r, 'Inspector', 'id') || r.Inspector?.id || '',
+      inspector: fullName(r, 'Inspector', 'first_name', 'last_name'),
+      unit: related(r, 'Unit', 'Name') || lookupName(r.Unit),
+      client: i?.client ?? '',
+      city: i?.city ?? '',
+      reservation: related(r, 'Reservation', 'Name') || lookupName(r.Reservation),
+      reservationId,
+    }
+  })
 }
 
 export async function getOverdueReservations(): Promise<OverdueItem[]> {
-  const query =
-    'select id, Name, Overdue_Days, End_Date, Contact.First_Name, Contact.Last_Name, Contact.id, Reservation_Status ' +
-    'from Reservations ' +
-    'where Is_Overdue = true ' +
-    'order by Overdue_Days desc limit 200'
-  const rows = await runCoql(query)
-  // Is_Overdue e manual: so conta como atraso se o fim previsto ja passou (antes de hoje).
-  const d = new Date()
-  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const rows = await coqlAll(
+    'id, Name, Overdue_Days, End_Date, Reservation_Status, Delivery_Address_City, Account.Account_Name, Account.id, ' +
+      'Contact.First_Name, Contact.Last_Name, Contact.id, Owner.first_name, Owner.last_name, Owner.id',
+    'Reservations',
+    'Is_Overdue = true',
+    'Overdue_Days desc',
+  )
+  // Is_Overdue é manual: só conta como atraso se o fim previsto já passou (antes de hoje)
+  const today = toZohoDate(new Date())
   return rows
-    .filter((r) => r.End_Date && String(r.End_Date).substring(0, 10) < today)
-    .map((r) => ({
-      id: r.id,
-      name: r.Name ?? '-',
-      overdueDays: Number(r.Overdue_Days ?? 0),
-      endDate: r.End_Date ?? '',
-      client: fullName(r, 'Contact', 'First_Name', 'Last_Name'),
-      status: r.Reservation_Status ?? '-',
-      clientId: relatedValue(r, 'Contact', 'id') || r.Contact?.id || '',
-    }))
+    .filter((r) => r.End_Date && String(r.End_Date).slice(0, 10) < today)
+    .map((r) => {
+      const accountId = related(r, 'Account', 'id') || r.Account?.id || ''
+      return {
+        id: r.id,
+        name: r.Name ?? '—',
+        overdueDays: Number(r.Overdue_Days ?? 0),
+        endDate: String(r.End_Date).slice(0, 10),
+        client: related(r, 'Account', 'Account_Name') || fullName(r, 'Contact', 'First_Name', 'Last_Name') || lookupName(r.Account),
+        clientId: accountId || related(r, 'Contact', 'id') || r.Contact?.id || '',
+        clientEntity: accountId ? 'Accounts' : 'Contacts',
+        status: r.Reservation_Status ?? '—',
+        ownerId: related(r, 'Owner', 'id') || r.Owner?.id || '',
+        owner: fullName(r, 'Owner', 'first_name', 'last_name'),
+        city: r.Delivery_Address_City ?? '',
+      }
+    })
 }
 
-// Dados fictícios só para ver o aspeto fora do CRM (npm run dev).
-export function getMockData(): { logistics: LogisticsItem[]; overdue: OverdueItem[] } {
-  const today = new Date()
-  const at = (h: number, m = 0) => {
-    const d = new Date(today)
-    d.setHours(h, m, 0, 0)
-    return d.toISOString()
-  }
-  return {
-    logistics: [
-      { id: '1', name: 'ER-001', type: 'Entrega', status: 'Agendada', scheduledAt: at(9), responsible: 'Ana Costa', reservation: 'RES-12', reservationId: '' },
-      { id: '2', name: 'ER-002', type: 'Recolha', status: 'Em curso', scheduledAt: at(11, 30), responsible: 'Rui Matos', reservation: 'RES-08', reservationId: '' },
-      { id: '3', name: 'ER-003', type: 'Entrega', status: 'Concluída', scheduledAt: at(14), responsible: 'Ana Costa', reservation: 'RES-15', reservationId: '' },
-      { id: '4', name: 'ER-004', type: 'Recolha', status: 'Falhada', scheduledAt: at(16), responsible: 'Rui Matos', reservation: 'RES-05', reservationId: '' },
-    ],
-    overdue: [
-      { id: '1', name: 'RES-03', overdueDays: 4, endDate: '2026-11-06', client: 'King (Sample)', status: 'Em aluguer', clientId: '' },
-      { id: '2', name: 'RES-07', overdueDays: 1, endDate: '2026-11-09', client: 'Carolina Pinto', status: 'Recolha agendada', clientId: '' },
-    ],
-  }
+/** Lê tudo o que o painel mostra. Se uma leitura falhar, falha o conjunto (os valores não ficam a zero). */
+export async function getPanelData(day: Date): Promise<PanelData> {
+  const [logistics, inspections, overdue] = await Promise.all([getLogistics(day), getInspections(day), getOverdueReservations()])
+  return { logistics, inspections, overdue }
 }

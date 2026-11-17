@@ -1,15 +1,41 @@
 @import "tailwindcss";
 
 /*
-  Primary color alias — maps to the theme color set in widgetConfig.ts.
-  To change the theme: update themeColor in widgetConfig.ts, then replace
-  "amber" below with the matching Tailwind color name.
+  Identidade visual Equiply (ver src/config/equiply.ts).
+  eq-* são as cores da marca; primary-* aponta para o azul Equiply para os componentes do template.
 */
 @theme {
-  --color-primary-100: var(--color-blue-100);
-  --color-primary-200: var(--color-blue-200);
-  --color-primary-400: var(--color-blue-400);
-  --color-primary-500: var(--color-blue-500);
-  --color-primary-600: var(--color-blue-600);
-  --color-primary-700: var(--color-blue-700);
+  --color-eq-navy: #0b3a5b;
+  --color-eq-navy-dark: #082c46;
+  --color-eq-blue: #1f6fa8;
+  --color-eq-light: #8bc3ec;
+  --color-eq-orange: #fd7945;
+  --color-eq-green: #1e9e5a;
+  --color-eq-red: #d33f3f;
+  --color-eq-bg: #eef4f9;
+  --color-eq-line: #e1e7f0;
+  --color-eq-muted: #5b6b7f;
+
+  --color-primary-100: #e3f1fb;
+  --color-primary-200: #bfddf3;
+  --color-primary-400: #8bc3ec;
+  --color-primary-500: #1f6fa8;
+  --color-primary-600: #1a5f92;
+  --color-primary-700: #0b3a5b;
+
+  --font-sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html, body { margin: 0; background: var(--color-eq-bg); }
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-eq-navy);
+}
+
+.eq-card {
+  background: #fff;
+  border: 1px solid var(--color-eq-line);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgb(20 40 75 / 0.05);
 }
